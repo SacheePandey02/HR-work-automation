@@ -5,24 +5,98 @@ import Job from "./utils/Job";
 import User from "./utils/user";
 import Application from "./utils/Application";
 
+// export const handler: Handler = async (event) => {
+//   try {
+//     await connectDB();
+//     const user: any = getUserFromToken(event);
+
+//     const hr = await User.findById(user.id).select("name email");
+
+//     // 1. Basic Stats
+//     const jobs = await Job.find({ createdBy: user.id }).sort({ createdAt: -1 }).lean();
+//     const totalCandidates = await Application.countDocuments({});
+
+//     // 2. 🚀 NEW: Pipeline Aggregation (Grouping by Job and Status)
+//     const pipelineData = await Application.aggregate([
+//       {
+//         $group: {
+//           _id: { jobId: "$jobId", status: "$status" },
+//           count: { $sum: 1 }
+//         }
+//       },
+//       {
+//         $group: {
+//           _id: "$_id.jobId",
+//           stages: {
+//             $push: {
+//               status: "$_id.status",
+//               count: "$count"
+//             }
+//           }
+//         }
+//       }
+//     ]);
+
+//     // Populate Job details for the pipeline table
+//     const populatedPipeline = await Job.populate(pipelineData, { 
+//       path: "_id", 
+//       select: "title domain" 
+//     });
+
+//     return {
+//       statusCode: 200,
+//       body: JSON.stringify({
+//         hr,
+//         totalJobs: jobs.length,
+//         totalCandidates,
+//         jobs,
+//         pipeline: populatedPipeline // This feeds the new chart
+//       }),
+//     };
+//   } catch (err: any) {
+//     return { statusCode: 500, body: JSON.stringify({ message: err.message }) };
+//   }
+// };
 export const handler: Handler = async (event) => {
   try {
+    console.log("📊 dashboard-stats called");
+
     await connectDB();
+
     const user: any = getUserFromToken(event);
+    console.log("🔐 Decoded user:", user);
+
+    if (!user || !user.id) {
+      console.error("❌ Invalid or missing token");
+      return {
+        statusCode: 401,
+        body: JSON.stringify({ message: "Unauthorized" }),
+      };
+    }
 
     const hr = await User.findById(user.id).select("name email");
+    console.log("👤 HR found:", hr);
 
-    // 1. Basic Stats
-    const jobs = await Job.find({ createdBy: user.id }).sort({ createdAt: -1 }).lean();
+    if (!hr) {
+      console.error("❌ HR not found in DB");
+      return {
+        statusCode: 404,
+        body: JSON.stringify({ message: "User not found" }),
+      };
+    }
+
+    const jobs = await Job.find({ createdBy: user.id })
+      .sort({ createdAt: -1 })
+      .lean();
+
     const totalCandidates = await Application.countDocuments({});
 
-    // 2. 🚀 NEW: Pipeline Aggregation (Grouping by Job and Status)
     const pipelineData = await Application.aggregate([
       {
         $group: {
           _id: { jobId: "$jobId", status: "$status" },
-          count: { $sum: 1 }
-        }
+          count: { $sum: 1 },
+        },
       },
       {
         $group: {
@@ -30,17 +104,16 @@ export const handler: Handler = async (event) => {
           stages: {
             $push: {
               status: "$_id.status",
-              count: "$count"
-            }
-          }
-        }
-      }
+              count: "$count",
+            },
+          },
+        },
+      },
     ]);
 
-    // Populate Job details for the pipeline table
-    const populatedPipeline = await Job.populate(pipelineData, { 
-      path: "_id", 
-      select: "title domain" 
+    const populatedPipeline = await Job.populate(pipelineData, {
+      path: "_id",
+      select: "title domain",
     });
 
     return {
@@ -50,10 +123,17 @@ export const handler: Handler = async (event) => {
         totalJobs: jobs.length,
         totalCandidates,
         jobs,
-        pipeline: populatedPipeline // This feeds the new chart
+        pipeline: populatedPipeline,
       }),
     };
   } catch (err: any) {
-    return { statusCode: 500, body: JSON.stringify({ message: err.message }) };
+    console.error("❌ DASHBOARD ERROR FULL:", err);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({
+        message: err.message,
+        stack: err.stack,
+      }),
+    };
   }
 };
